@@ -84,24 +84,18 @@ void check_gpu_arch(hipStream_t stream) {
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
-        const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
-        const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
-        std::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
-        std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
-        const float p_dropout,
-        const float softmax_scale,
-        bool is_causal,
-        int window_size_left,
-        int window_size_right,
-        const bool return_softmax,
-        std::optional<at::Generator> gen_) {
-  // Otherwise the kernel will be launched from cuda:0 device
-  // Cast to char to avoid compiler warning about narrowing
-  // [ROCM specific]: must be at the beginning of the function
-  // Otherwise check_gpu_arch() checks cuda:0 device.
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-
+mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
+            const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
+            const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
+            std::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
+            std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+            const float p_dropout,
+            const float softmax_scale,
+            bool is_causal,
+            int window_size_left,
+            int window_size_right,
+            const bool return_softmax,
+            std::optional<at::Generator> gen_) {
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
 
@@ -161,6 +155,10 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
   const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
+  // Otherwise the kernel will be launched from cuda:0 device
+  // Cast to char to avoid compiler warning about narrowing
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+
   // We want to checkpoint and save the RNG state for backward if dropout
   // We get the default generator and return the seed and offset which will
   // be used in the backward function
@@ -203,14 +201,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   at::Tensor v_t = v_padded.permute({0,2,1,3});
   at::Tensor output_t = out.permute({0,2,1,3});
 
-  auto opts = q.options();
-  at::Tensor M = at::empty({batch_size * num_heads, seqlen_q}, opts.dtype(at::kFloat)); // aka softmax_lse
+  at::Tensor M = at::empty({batch_size * num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
 
   at::Tensor softmax_fa_t;
   if (return_softmax) {
-    softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts);
+    softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k},
+                             at::dtype(q.dtype()).device(q.device()));
   } else {
-    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
+    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, at::dtype(q.dtype()).device(q.device()));
   }
 
   hipError_t err; // TODO: Error handling
@@ -243,29 +241,28 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                  is_causal,
                  stream);
 
-  return {out, q_padded, k_padded, v_padded, M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
+  return {out, q_padded, k_padded, v_padded, M, seed_t, offset_t, softmax_fa_t};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
-               const at::Tensor &k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               const at::Tensor &v,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               std::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
-               const at::Tensor &cu_seqlens_q,  // b+1
-               const at::Tensor &cu_seqlens_k,  // b+1
-               std::optional<at::Tensor> &seqused_k, // b. If given, only this many elements of each batch element's keys are used.
-               std::optional<at::Tensor> &block_table_, // batch_size x max_num_blocks_per_seq
-               std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
-               int max_seqlen_q,
-               const int max_seqlen_k,
-               const float p_dropout,
-               const float softmax_scale,
-               const bool zero_tensors,
-               bool is_causal,
-               int window_size_left,
-               int window_size_right,
-               const bool return_softmax,
-               std::optional<at::Generator> gen_) {
+mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+                   const at::Tensor &k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                   const at::Tensor &v,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                   std::optional<at::Tensor> &out_, // total_q x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
+                   const at::Tensor &cu_seqlens_q,  // b+1
+                   const at::Tensor &cu_seqlens_k,  // b+1
+                   std::optional<at::Tensor> &seqused_k, // b. If given, only this many elements of each batch element's keys are used.
+                   std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
+                   int max_seqlen_q,
+                   const int max_seqlen_k,
+                   const float p_dropout,
+                   const float softmax_scale,
+                   const bool zero_tensors,
+                   bool is_causal,
+                   int window_size_left,
+                   int window_size_right,
+                   const bool return_softmax,
+                   std::optional<at::Generator> gen_) {
 
   TORCH_CHECK(false, "mha_varlen_fwd not supported on ROCm");
 
@@ -279,24 +276,24 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_size_og
-        const at::Tensor &q,   // batch_size x seqlen_q x num_heads x head_size
-        const at::Tensor &k,   // batch_size x seqlen_k x num_heads_k x head_size
-        const at::Tensor &v,   // batch_size x seqlen_k x num_heads_k x head_size
-        const at::Tensor &out,   // batch_size x seqlen_q x num_heads x head_size
-        const at::Tensor &softmax_lse,     // b x h x seqlen_q
-        std::optional<at::Tensor> &dq_,   // batch_size x seqlen_q x num_heads x head_size
-        std::optional<at::Tensor> &dk_,   // batch_size x seqlen_k x num_heads_k x head_size
-        std::optional<at::Tensor> &dv_,   // batch_size x seqlen_k x num_heads_k x head_size
-        std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
-        const float p_dropout,         // probability to drop
-        const float softmax_scale,
-        const bool is_causal,
-        int window_size_left,
-        int window_size_right,
-        const bool deterministic,
-        const at::Tensor philox_seed,
-        const at::Tensor philox_offset) {
+mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_size_og
+            const at::Tensor &q,   // batch_size x seqlen_q x num_heads x head_size
+            const at::Tensor &k,   // batch_size x seqlen_k x num_heads_k x head_size
+            const at::Tensor &v,   // batch_size x seqlen_k x num_heads_k x head_size
+            const at::Tensor &out,   // batch_size x seqlen_q x num_heads x head_size
+            const at::Tensor &softmax_lse,     // b x h x seqlen_q
+            std::optional<at::Tensor> &dq_,   // batch_size x seqlen_q x num_heads x head_size
+            std::optional<at::Tensor> &dk_,   // batch_size x seqlen_k x num_heads_k x head_size
+            std::optional<at::Tensor> &dv_,   // batch_size x seqlen_k x num_heads_k x head_size
+            std::optional<at::Tensor> &alibi_slopes_, // num_heads or batch_size x num_heads
+            const float p_dropout,         // probability to drop
+            const float softmax_scale,
+            const bool is_causal,
+            int window_size_left,
+            int window_size_right,
+            const bool deterministic,
+            const at::Tensor philox_seed,
+            const at::Tensor philox_offset) {
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
 
@@ -408,8 +405,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   at::Tensor dv_t = dv.permute({0,2,1,3});
   at::Tensor dout_t = dout.permute({0,2,1,3});
 
-  at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, seqlen_q}).contiguous();
-  at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
+  at::Tensor softmax_lse_cont = softmax_lse.contiguous();
+  at::Tensor delta = at::empty_like(softmax_lse).contiguous();
 
   int d_head = head_size_og;
   hipError_t err; // TODO: Error handling
@@ -451,35 +448,35 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
-               const at::Tensor &q,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
-               const at::Tensor &k,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               const at::Tensor &v,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               const at::Tensor &out,   // total_q x num_heads x head_size
-               const at::Tensor &softmax_lse,     // b x h x s   softmax logsumexp
-               std::optional<at::Tensor> &dq_,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
-               std::optional<at::Tensor> &dk_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               std::optional<at::Tensor> &dv_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
-               const at::Tensor &cu_seqlens_q,  // b+1
-               const at::Tensor &cu_seqlens_k,  // b+1
-               std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
-               const int max_seqlen_q,
-               const int max_seqlen_k,          // max sequence length to choose the kernel
-               const float p_dropout,         // probability to drop
-               const float softmax_scale,
-               const bool zero_tensors,
-               const bool is_causal,
-               int window_size_left,
-               int window_size_right,
-               const bool deterministic,
-               const at::Tensor philox_seed,
-               const at::Tensor philox_offset) {
+mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
+                   const at::Tensor &q,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+                   const at::Tensor &k,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                   const at::Tensor &v,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                   const at::Tensor &out,   // total_q x num_heads x head_size
+                   const at::Tensor &softmax_lse,     // b x h x s   softmax logsumexp
+                   std::optional<at::Tensor> &dq_,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
+                   std::optional<at::Tensor> &dk_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                   std::optional<at::Tensor> &dv_,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
+                   const at::Tensor &cu_seqlens_q,  // b+1
+                   const at::Tensor &cu_seqlens_k,  // b+1
+                   std::optional<at::Tensor> &alibi_slopes_, // num_heads or b x num_heads
+                   const int max_seqlen_q,
+                   const int max_seqlen_k,          // max sequence length to choose the kernel
+                   const float p_dropout,         // probability to drop
+                   const float softmax_scale,
+                   const bool zero_tensors,
+                   const bool is_causal,
+                   int window_size_left,
+                   int window_size_right,
+                   const bool deterministic,
+                   const at::Tensor philox_seed,
+                   const at::Tensor philox_offset) {
   TORCH_CHECK(false, "mha_varlen_bwd not supported on ROCm");
 
   at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
 
   return { q, k, v, softmax_d };
 }
-} // namespace pytorch_fmha
+} // namespace pytorch_flash
 
 #endif
