@@ -4546,6 +4546,102 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
+class ProcessGroupNCCLMultiDimsTest(MultiProcessTestCase):
+    def _init_process_group_nccl(self, store, device_id=None):
+        # create nccl processgroup with opts
+        c10d.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device_id,
+        )
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "3"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self):
+        return 8
+
+    @skip_if_lt_x_gpu(8)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
+    )
+    def test_3d_mesh_with_cudaevent_cache(self):
+        torch.cuda.set_device(self.rank)
+        # os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._init_process_group_nccl(store)
+        from torch.distributed.device_mesh import init_device_mesh
+
+        mesh_shape = (2, 2, 2)
+        mesh_3d = init_device_mesh(
+            "cuda", mesh_shape, mesh_dim_names=("pp", "dp", "tp")
+        )
+        # The mesh is like:
+        # TP: [0, 1], [2, 3], [4, 5], [6, 7]
+        # DP: [0, 2], [1, 3], [4, 6], [5, 7]
+        # PP: [0, 4], [1, 5], [2, 6], [3, 7]
+
+        device = torch.device("cuda:%d" % self.rank)
+        num_tensors = 5000
+        tensors = []
+        expected_tensors = []
+        for i in range(num_tensors):
+            tensor = torch.full(
+                (60 + i,), self.rank + 1 + i, device=device, dtype=torch.float
+            )
+            tensors.append((tensor.clone(), tensor.clone(), tensor.clone()))
+            expected_tensors.append(
+                (
+                    torch.full(
+                        (60 + i,),
+                        sum(mesh_3d["dp"].mesh.tolist()) + 2 + 2 * i,
+                        device=device,
+                        dtype=torch.float,
+                    ),
+                    torch.full(
+                        (60 + i,),
+                        sum(mesh_3d["tp"].mesh.tolist()) + 2 + 2 * i,
+                        device=device,
+                        dtype=torch.float,
+                    ),
+                    torch.full(
+                        (60 + i,),
+                        sum(mesh_3d["pp"].mesh.tolist()) + 2 + 2 * i,
+                        device=device,
+                        dtype=torch.float,
+                    ),
+                )
+            )
+        for idx in range(num_tensors):
+            torch.distributed.all_reduce(tensors[idx][0], group=mesh_3d.get_group("dp"))
+            torch.distributed.all_reduce(tensors[idx][1], group=mesh_3d.get_group("tp"))
+            torch.distributed.all_reduce(tensors[idx][2], group=mesh_3d.get_group("pp"))
+            if idx % 1000 == 0:
+                time.sleep(1)
+                torch.cuda.synchronize()
+        for idx in range(num_tensors):
+            self.assertEqual(tensors[idx][0], expected_tensors[idx][0])
+            self.assertEqual(tensors[idx][1], expected_tensors[idx][1])
+            self.assertEqual(tensors[idx][2], expected_tensors[idx][2])
+        
+
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
