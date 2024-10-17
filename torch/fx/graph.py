@@ -786,16 +786,16 @@ class _PyTreeCodeGen(CodeGen):
             has_args_kwargs_tuple = (
                 self.pytree_info.in_spec.type is tuple
                 and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type is tuple
-                and self.pytree_info.in_spec.children_specs[1].type is dict
+                and self.pytree_info.in_spec.child(0).type == tuple
+                and self.pytree_info.in_spec.child(1).type == dict
             )
             if has_args_kwargs_tuple:
-                count_args = self.pytree_info.in_spec.children_specs[0].num_children
+                count_args = self.pytree_info.in_spec.child(0).num_children
                 sig_args = repr(tuple(map(StrReprNoQuotes, fn_args[:count_args])))
                 sig_kwargs = repr(
                     dict(
                         zip(
-                            self.pytree_info.in_spec.children_specs[1].context,
+                            self.pytree_info.in_spec.child(1).context,
                             map(StrReprNoQuotes, fn_args[count_args:]),
                         )
                     )
