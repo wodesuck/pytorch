@@ -656,7 +656,7 @@ def run_test_retries(
                 + " or file got deleted (contact dev infra)"
             )
             break
-        if "ended_at" not in cache:
+        if ret_code != 0 and "ended_at" not in cache:
             print_to_file("Failed despite no tests running")
             return 1, False
 
