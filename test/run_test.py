@@ -551,7 +551,7 @@ def run_test(
                 test_file,
             )
         else:
-            command.extend([f"--sc={stepcurrent_key}", "--print-items"])
+            command.extend(["--print-items"])
             ret_code, was_rerun = retry_shell(
                 command,
                 test_directory,
