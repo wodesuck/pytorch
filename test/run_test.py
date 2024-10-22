@@ -652,10 +652,10 @@ def run_test_retries(
                 cache = json.load(f)
         except FileNotFoundError:
             print_to_file(
-                "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
+                "No stepcurrent file found. Either pytest didn't run"
                 + " or file got deleted (contact dev infra)"
             )
-            break
+            return ret_code, False
         if ret_code != 0 and "ended_at" not in cache:
             print_to_file("Failed despite no tests running")
             return 1, False

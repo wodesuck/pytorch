@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -13,7 +14,7 @@ def get_timestamp() -> str:
 
 def make_manual_xml(
     invoking_file: str, pytest_testname: str, duration: float, sysout: str
-) -> str:
+) -> None:
     """Generate a JUnit XML string for a single test run."""
 
     sanitized_invoking_file = invoking_file.replace("/", ".")
