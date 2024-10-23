@@ -1125,6 +1125,9 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     if (dtype == ScalarType::Half) {
       static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
       return fp16_support;
+    } else if (dtype == ScalarType::BFloat16) {
+      static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
+      return bf16_support;
     }
     return false;
   }
@@ -1172,6 +1175,9 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     if (dtype == ScalarType::Half) {
       static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
       return fp16_pack;
+    } else if (dtype == ScalarType::BFloat16) {
+      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return bf16_pack;
     }
     return false;
   }
@@ -1198,6 +1204,28 @@ void brgemm(
 #endif
   TORCH_CHECK(false,
   "Half Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512_fp16 is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
+    float* C) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (Brgemm::device_check(ScalarType::BFloat16)) {
+    Brgemm::call<at::BFloat16, at::BFloat16, float>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  TORCH_CHECK(false,
+  "BFloat16 Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512 is supported");
 }
 
 void brgemm_release() {
