@@ -625,8 +625,7 @@ def run_test_retries(
         with open(output_file) as f:
             return "".join(f.readlines()[-40:])
 
-    # print_items = ["--print-items"]
-    print_items = []
+    print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     step_current_file = (
         REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
