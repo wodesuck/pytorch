@@ -25,6 +25,11 @@ on:
         required: false
         type: boolean
         default: true
+      default_cpu_f32:
+        description: Run inductor_default with f32 precision?
+        required: false
+        type: boolean
+        default: true
       dynamic:
         description: Run inductor_dynamic_shapes?
         required: false
@@ -108,7 +113,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-default_cpu_f32-${{ inputs.default_cpu_f32 }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
