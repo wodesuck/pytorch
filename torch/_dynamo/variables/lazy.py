@@ -91,15 +91,15 @@ class LazyVariableTracker(VariableTracker):
 
     def __str__(self) -> str:
         if self.is_realized():
-            return repr(self.unwrap())
-        return super().__repr__()
+            return self.unwrap().__str__()
+        return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
     visit = VariableTracker.visit  # type: ignore[assignment]
-    __repr__ = __str__
+    __repr__ = VariableTracker.__repr__
 
     @classmethod
     def realize_all(
@@ -153,7 +153,7 @@ class LazySymNodeFormatString:
             "{:" + fmt_spec_var.as_python_constant() + "}"
         )
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return str.format(
             self.fmt_var.as_python_constant(),
             str(self.sym_node_var.evaluate_expr()),

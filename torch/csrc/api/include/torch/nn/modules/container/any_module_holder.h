@@ -46,8 +46,7 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
       if (auto* maybe_value = value.template try_get<std::decay_t<T>>()) {
         return std::move(*maybe_value);
       }
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "Expected argument #",
           index,
           " to be of type ",

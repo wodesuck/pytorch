@@ -746,10 +746,9 @@ void Block::destroy() {
 
 void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
-    TORCH_CHECK(
-        false,
+    AT_ERROR(
         "Graph::copy() encountered a use of a value " + v->debugName() +
-            " not in scope. Run lint!");
+        " not in scope. Run lint!");
   };
   block()->cloneFrom(src.block(), env);
 }

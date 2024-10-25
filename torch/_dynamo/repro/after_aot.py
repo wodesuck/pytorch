@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-
 import argparse
 import copy
 import functools
@@ -13,8 +12,7 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
-from typing_extensions import Unpack
+from typing import Any, Callable, Dict, Union
 
 import torch
 import torch.fx as fx
@@ -47,12 +45,6 @@ from torch.hub import tqdm
 from .. import config
 
 
-if TYPE_CHECKING:
-    from torch._inductor.codecache import CompiledFxGraph
-    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
-    from torch._inductor.utils import InputType
-
-
 log = logging.getLogger(__name__)
 
 
@@ -64,10 +56,7 @@ use_buck = inductor_config.is_fbcode()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallableEx",
-    compiler_name: str,
-) -> "_CompileFxCallableEx":
+def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -77,11 +66,7 @@ def wrap_compiler_debug(
     """
 
     @functools.wraps(unconfigured_compiler_fn)
-    def debug_wrapper(
-        gm: torch.fx.GraphModule,
-        example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargsEx"],
-    ) -> Union["CompiledFxGraph", str]:
+    def debug_wrapper(gm, example_inputs, **kwargs):
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -119,15 +104,11 @@ def wrap_compiler_debug(
 
         # We may run regular PyTorch compute that may trigger Dynamo, do NOT
         # recursively attempt to accuracy minify in that case!
-        def deferred_for_real_inputs(
-            real_inputs: Sequence["InputType"], **_kwargs: object
-        ) -> Any:
+        def deferred_for_real_inputs(real_inputs):
             # This is a bit obscure: if we recursively try to accuracy minify
             # the SAME function, this would trigger.  But most of the time
             # we should never hit this branch
-            assert not _kwargs
             if config.repro_after != "aot":
-                assert not isinstance(inner_compiled_fn, str)
                 return inner_compiled_fn(real_inputs)
             with config.patch(repro_after=None):
                 return inner_debug_fn(real_inputs)
@@ -184,11 +165,11 @@ def wrap_compiler_debug(
                     raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)  # type: ignore[operator]
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiled function with real inputs
-                    out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
+                    out = inner_compiled_fn(real_inputs)
                     # sync cuda kernels to ensure IMA detection
                     for arg in example_inputs:
                         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -213,7 +194,7 @@ def wrap_compiler_debug(
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
             compiled_fn._boxed_call = True  # type: ignore[attr-defined]
-            return compiled_fn  # type: ignore[return-value]
+            return compiled_fn
         else:
             return inner_compiled_fn
 
@@ -451,7 +432,6 @@ def inductor_fails(fx_g, args, check_str=None):
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
-        assert not isinstance(compile_mod, str)
         compile_mod(args)
         sync()
     except Exception as e:
@@ -621,7 +601,6 @@ def repro_analyze(options, mod, load_args):
     with intermediate_hook(save_hook), tqdm(
         desc="Saving inductor intermediates", total=total
     ) as pbar:
-        assert not isinstance(compiled, str)
         compiled(new_args)
         assert not new_args
 
@@ -738,7 +717,6 @@ def repro_run(options, mod, load_args):
     from torch.cuda import synchronize
 
     compiled = compile_fx_inner(mod, args)
-    assert not isinstance(compiled, str)
 
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it

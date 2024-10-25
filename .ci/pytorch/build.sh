@@ -203,9 +203,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    export USE_CUDA=1
-  fi
+  export USE_CUDA=0
   export USE_ASAN=1
   export REL_WITH_DEB_INFO=1
   export UBSAN_FLAGS="-fno-sanitize-recover=all"

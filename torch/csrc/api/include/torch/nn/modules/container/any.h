@@ -351,8 +351,7 @@ ModuleType& AnyModule::get_(
                 *content_)
                 .module;
   }
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       "Attempted to cast module of type ",
       c10::demangle(type_info().name()),
       " to type ",

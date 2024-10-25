@@ -585,7 +585,7 @@ struct TORCH_API Type {
   virtual TypePtr createWithContained(
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<TypePtr> /*contained_types*/) const {
-    TORCH_CHECK(false,
+    AT_ERROR(
         "type with contained types did not overload createWithContained: ",
         str());
   }
