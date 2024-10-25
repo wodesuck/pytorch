@@ -587,11 +587,6 @@ bool SocketListenOp::tryListen(int family) {
     }
   }
 
-  recordError(
-      "The server could not be initialized on any address for port={}, family={}",
-      port_,
-      family);
-
   return false;
 }
 
@@ -599,7 +594,7 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   SocketImpl::Handle hnd =
       ::socket(addr.ai_family, addr.ai_socktype, addr.ai_protocol);
   if (hnd == SocketImpl::invalid_socket) {
-    C10D_DEBUG(
+    recordError(
         "The server socket cannot be initialized on {} {}.",
         addr,
         getSocketError());

@@ -294,8 +294,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
   if (storage_impl->received_cuda()) {
-    TORCH_CHECK(
-        false,
+    AT_ERROR(
         "Attempted to send CUDA tensor received from another process; this is not currently supported. Consider cloning before sending.");
   }
 

@@ -47,7 +47,6 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 
 if TYPE_CHECKING:
-    from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -206,7 +205,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         gm: torch.fx.GraphModule,
         example_inputs,
         aot_config: AOTConfig,
-        fx_config: _CompileFxKwargs,
+        fx_config: Dict[str, BoxedBool],
     ):
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
@@ -270,7 +269,7 @@ def autograd_cache_key(
     gm: torch.fx.GraphModule,
     example_inputs,
     config: AOTConfig,
-    fx_config: _CompileFxKwargs,
+    fx_config: Dict[str, BoxedBool],
     # TODO: add args and parameters
 ) -> Tuple[str, List[str]]:
     """
@@ -296,7 +295,7 @@ class FXGraphCacheLoadable:
     def is_backward(self):
         return False
 
-    def load(self, example_inputs, fx_config: _CompileFxKwargs) -> CompiledFxGraph:
+    def load(self, example_inputs, fx_config: Dict[str, BoxedBool]) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
@@ -333,7 +332,7 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
+        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])
         result._boxed_call = True
         return result
 
@@ -400,7 +399,7 @@ class AOTAutogradCacheEntry:
         self,
         args: List[torch.Tensor],
         aot_config: AOTConfig,
-        fx_config: _CompileFxKwargs,
+        fx_config: Dict[str, BoxedBool],
     ) -> Callable:
         """
         This function takes a cache entry and carefully reconstructs the original callable
@@ -567,7 +566,7 @@ class AOTAutogradCache:
         debug_lines: List[str] = []
         cache_event_time = time.time_ns()
         cache_state = None
-        fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
+        fx_config = {"cudagraphs": cudagraphs}
         try:
             cache_key, debug_lines = autograd_cache_key(gm, args, aot_config, fx_config)
             entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(

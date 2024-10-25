@@ -67,6 +67,10 @@ C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 #endif
 
 #if GLOO_HAVE_TRANSPORT_TCP_TLS
+static std::string cstr_to_std_string(const char* chars) {
+  return std::string(chars != nullptr ? chars : "");
+}
+
 static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
     const std::string& interface,
     const std::string& hostname) {
@@ -81,20 +85,12 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPTLSDevice(
   } else {
     attr.hostname = hostname;
   }
-  const auto pkey_env =
-      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY");
-  const auto pkey = pkey_env.has_value() ? pkey_env.value() : std::string();
-  const auto cert_env =
-      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT");
-  const auto cert = cert_env.has_value() ? cert_env.value() : std::string();
-  const auto caFile_env =
-      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE");
+  const auto pkey = c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY");
+  const auto cert = c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT");
   const auto caFile =
-      caFile_env.has_value() ? caFile_env.value() : std::string();
-  const auto caPath_env =
-      c10::utils::get_env("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH");
+      c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE");
   const auto caPath =
-      caPath_env.has_value() ? caPath_env.value() : std::string();
+      c10::utils::getenv("GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_PATH");
   return ::gloo::transport::tcp::tls::CreateDevice(
       attr, pkey, cert, caFile, caPath);
 }
@@ -132,10 +128,9 @@ namespace {
 std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
     const std::string& interfaceName,
     const std::string& hostName) {
-  static auto transportName = c10::utils::get_env("GLOO_DEVICE_TRANSPORT");
-  if (transportName.has_value()) {
-    return GlooDeviceRegistry()->Create(
-        transportName.value().c_str(), interfaceName, hostName);
+  static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
+  if (transportName) {
+    return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);
   }
 
 #ifdef __linux__

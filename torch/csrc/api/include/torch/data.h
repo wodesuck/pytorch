@@ -8,6 +8,6 @@
 // Some "exports".
 
 namespace torch::data {
-using datasets::BatchDataset; // NOLINT
-using datasets::Dataset; // NOLINT
+using datasets::BatchDataset;
+using datasets::Dataset;
 } // namespace torch::data

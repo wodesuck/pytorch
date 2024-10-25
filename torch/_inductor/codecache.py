@@ -80,9 +80,7 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .compile_fx import _CompileFxKwargs
     from .remote_cache import JsonDataTy, RemoteCache
-    from .utils import InputType
 
 
 """
@@ -753,25 +751,23 @@ class FxGraphHashDetails:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
+        example_inputs: List[torch.Tensor],
+        fx_kwargs: Dict[str, Any],
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
         self.example_inputs = example_inputs
 
-        # Order kwargs so hashing is stable to changes in kwarg order. Although
-        # it's technically a _CompileFxKwargs we don't actually need it typed as
-        # such since we're just using it to generate a hash.
-        self.fx_kwargs: Dict[str, object] = {}
-        for k, v in sorted(fx_kwargs.items()):
+        # Order kwargs so hashing is stable to changes in kwarg order.
+        self.fx_kwargs = {}
+        for k in sorted(fx_kwargs):
             if k not in self.EXCLUDED_KWARGS:
-                if type(v) is set:
+                if type(fx_kwargs[k]) is set:
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
                 else:
-                    self.fx_kwargs[k] = v
+                    self.fx_kwargs[k] = fx_kwargs[k]
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
@@ -822,8 +818,8 @@ class FxGraphHashDetails:
 
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
-    example_inputs: Sequence[InputType],
-    fx_kwargs: _CompileFxKwargs,
+    example_inputs: List[torch.Tensor],
+    fx_kwargs: Dict[str, Any],
     inputs_to_check: Sequence[int],
 ) -> Tuple[str, List[str]]:
     """
@@ -840,7 +836,7 @@ def compiled_fx_graph_hash(
 
 
 def cudagraph_post_compile(
-    example_inputs: Sequence[InputType],
+    example_inputs: List[Any],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
 ) -> None:
@@ -883,7 +879,7 @@ def cudagraph_post_compile(
         assert current_callable is not None
         compiled_graph.current_callable = cudagraphify(
             current_callable,
-            static_input_idxs=static_input_idxs or (),
+            static_input_idxs=static_input_idxs,
             device_index=next(iter(compiled_graph.device_idxs)),
             stack_traces=stack_traces,
             is_backward=is_backward,
@@ -1022,7 +1018,7 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_backed_symints(inputs: Sequence[InputType]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: List[Any]) -> List[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
@@ -1042,7 +1038,7 @@ class FxGraphCache:
     @staticmethod
     def _lookup_graph(
         key: str,
-        example_inputs: Sequence[InputType],
+        example_inputs: List[torch.Tensor],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> Optional[CompiledFxGraph]:
@@ -1181,7 +1177,7 @@ class FxGraphCache:
     @staticmethod
     def post_compile(
         compiled_graph: CompiledFxGraph,
-        example_inputs: Sequence[InputType],
+        example_inputs: List[torch.Tensor],
         cudagraphs: BoxedBool,
     ) -> CompiledFxGraph:
         """
@@ -1228,7 +1224,7 @@ class FxGraphCache:
     def _save_graph(
         key: str,
         compiled_graph: CompiledFxGraph,
-        example_inputs: Sequence[InputType],
+        example_inputs: List[torch.Tensor],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> None:
@@ -1337,8 +1333,8 @@ class FxGraphCache:
     @staticmethod
     def prepare_key(
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
+        example_inputs: List[torch.Tensor],
+        fx_kwargs: Dict[str, Any],
         inputs_to_check: Sequence[int],
         remote: bool,
     ) -> Tuple[Optional[Tuple[str, List[str]]], Dict[str, Any]]:
@@ -1388,7 +1384,7 @@ class FxGraphCache:
     def load_with_key(
         key: str,
         debug_lines: List[str],
-        example_inputs: Sequence[InputType],
+        example_inputs: List[torch.Tensor],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
@@ -1431,8 +1427,8 @@ class FxGraphCache:
     def load(  # type: ignore[no-untyped-def]
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
+        example_inputs: List[torch.Tensor],
+        fx_kwargs: Dict[str, Any],
         inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
@@ -1518,7 +1514,7 @@ class FxGraphCache:
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
-            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]  # type: ignore[arg-type]
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]
         )
         return compiled_graph
 
@@ -1565,7 +1561,7 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
-    fx_kwargs: _CompileFxKwargs
+    fx_kwargs: Dict[str, Any]
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
@@ -1605,7 +1601,7 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
+    def __call__(self, inputs: List[Any]) -> Any:
         assert self.current_callable is not None
         try:
             return self.current_callable(inputs)

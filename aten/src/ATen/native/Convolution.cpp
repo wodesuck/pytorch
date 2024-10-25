@@ -719,7 +719,7 @@ static void check_shape_forward(const at::Tensor& input,
         separator = " x ";
       }
 
-      TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
+      AT_ERROR("Calculated padded input size per channel: (", input_ss.str(), "). "
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
@@ -1304,7 +1304,7 @@ ConvBackend _select_conv_backend(
   }
 
   // Error out if no suitable backend was found.
-  TORCH_CHECK(false, "unsupported ConvNd parameters");
+  AT_ERROR("unsupported ConvNd parameters");
 }
 
 // Selects a backend for convolution based on the inputs and params.

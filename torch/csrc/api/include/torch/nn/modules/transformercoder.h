@@ -10,6 +10,7 @@
 
 #include <torch/types.h>
 
+#include <ostream>
 #include <utility>
 
 namespace torch::nn {

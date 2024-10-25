@@ -938,7 +938,7 @@ struct TORCH_API DictType : public SharedType {
       case TypeKind::DeviceObjType:
         return DictTypePtr(new DictType(std::move(key), std::move(value)));
       default:
-        TORCH_CHECK(false,
+        AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
             "', only int, float, complex, Tensor, device and string keys are supported");

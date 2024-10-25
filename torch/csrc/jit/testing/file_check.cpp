@@ -506,10 +506,13 @@ struct FileCheckImpl {
         end_range = start_range + check.search_str_.size();
         break;
       }
-      default:
-        TORCH_CHECK(false);
+      case CHECK_DAG: {
+        AT_ERROR();
+      } break;
+      case CHECK_NOT: {
+        AT_ERROR();
+      } break;
     }
-
     return SourceRange(source, start_range, end_range);
   }
 
