@@ -164,9 +164,6 @@ else
     USE_KINETO=1
 fi
 
-# Use mkl shared for CI.
-export USE_STATIC_MKL=0
-
 echo "Calling setup.py bdist at $(date)"
 
 if [[ "$USE_SPLIT_BUILD" == "true" ]]; then

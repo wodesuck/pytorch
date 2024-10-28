@@ -119,9 +119,6 @@ if "%USE_CUDA%"=="1" (
   set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
-:: Use mkl shared for CI.
-set USE_STATIC_MKL=0
-
 :: Print all existing environment variable for debugging
 set
 
