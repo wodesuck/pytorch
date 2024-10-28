@@ -4,13 +4,22 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def get_timestamp() -> str:
     return datetime.now().isoformat()
 
+def sanitize_sysout(sysout: str) -> str:
+    # Source: https://stackoverflow.com/questions/1546717/escaping-strings-for-use-in-xml
+    table = str.maketrans({
+        "<": "&lt;",
+        ">": "&gt;",
+        "&": "&amp;",
+        "'": "&apos;",
+        '"': "&quot;",
+    })
+    return sysout.translate(table)
 
 def make_manual_xml(
     invoking_file: str, pytest_testname: str, duration: float, sysout: str
@@ -35,7 +44,7 @@ def make_manual_xml(
     testname = re_match.group("testname")
     testcase = (
         f'<testcase name="{testname}" classname="{classname}" file="{file}" time="{duration}">'
-        f"<failure message={json.dumps(sysout)}></failure></testcase>"
+        f"<failure message={sanitize_sysout(sysout)}></failure></testcase>"
     )
     testsuite = (
         f'<testsuite name="{classname}" tests="1" errors="0" failures="0" skipped="0" '
