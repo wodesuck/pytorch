@@ -11,17 +11,21 @@ def get_timestamp() -> str:
     return datetime.now().isoformat()
 
 
-def sanitize_sysout(sysout: str) -> str:
+def sanitize_sysout(sysout: str, quotes: bool = True) -> str:
     # Source: https://stackoverflow.com/questions/1546717/escaping-strings-for-use-in-xml
-    table = str.maketrans(
-        {
-            "<": "&lt;",
-            ">": "&gt;",
-            "&": "&amp;",
-            "'": "&apos;",
-            '"': "&quot;",
-        }
-    )
+    trans_dict = {
+        "<": "&lt;",
+        ">": "&gt;",
+        "&": "&amp;",
+    }
+    if quotes:
+        trans_dict.update(
+            {
+                "'": "&apos;",
+                '"': "&quot;",
+            }
+        )
+    table = str.maketrans(trans_dict)
     return sysout.translate(table)
 
 
@@ -48,7 +52,8 @@ def make_manual_xml(
     testname = re_match.group("testname")
     testcase = (
         f'<testcase name="{testname}" classname="{classname}" file="{file}" time="{duration}">'
-        f'<failure message="{sanitize_sysout(sysout)}"></failure></testcase>'
+        f'<failure message="{sanitize_sysout(sysout)}">{sanitize_sysout(sysout, quotes=False)}'
+        f"</failure></testcase>"
     )
     testsuite = (
         f'<testsuite name="{classname}" tests="1" errors="0" failures="0" skipped="0" '
