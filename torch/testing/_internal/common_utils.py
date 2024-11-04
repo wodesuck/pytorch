@@ -897,6 +897,18 @@ torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
 
+CI_TEST_PREFIX = str(Path(os.getcwd()))
+
+
+# sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
+def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
+    strip_py = re.sub(r'.py$', '', filename)
+    return re.sub('/', r'.', strip_py)
+
+
 def get_report_path(pytest=False):
     pytest = "--use-pytest" in sys.argv or pytest
     test_filename = sanitize_test_filename(sys.argv[0])
@@ -976,7 +988,6 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path(os.getcwd()))
 CI_PT_ROOT = str(Path(os.getcwd()).parent)
 CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
@@ -1100,13 +1111,6 @@ def _print_test_names():
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
 
-# sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
-def sanitize_test_filename(filename):
-    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
-    if filename.startswith(CI_TEST_PREFIX):
-        filename = filename[len(CI_TEST_PREFIX) + 1:]
-    strip_py = re.sub(r'.py$', '', filename)
-    return re.sub('/', r'.', strip_py)
 
 def lint_test_case_extension(suite):
     succeed = True
