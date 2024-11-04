@@ -896,13 +896,18 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
-def _get_test_report_path():
-    # allow users to override the test file location. We need this
-    # because the distributed tests run the same test file multiple
-    # times with different configurations.
-    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
-    test_source = override if override is not None else 'python-unittest'
-    return os.path.join('test-reports', test_source)
+
+def get_report_path(pytest=False):
+    pytest = "--use-pytest" in sys.argv or pytest
+    test_filename = sanitize_test_filename(sys.argv[0])
+
+    source = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE', 'python-unittest' if not pytest else 'python-pytest')
+    test_report_path = os.path.join('test-reports', source + LOG_SUFFIX, test_filename)
+    os.makedirs(test_report_path, exist_ok=True)
+    if pytest:
+        test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
+    return test_report_path
+
 
 is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
 parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
@@ -915,8 +920,8 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
-                    const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_CI else None)
+                    const=get_report_path(),
+                    default=get_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -1122,19 +1127,6 @@ def lint_test_case_extension(suite):
     return succeed
 
 
-def get_report_path(argv=UNITTEST_ARGS, pytest=False):
-    test_filename = sanitize_test_filename(argv[0])
-    test_report_path = TEST_SAVE_XML + LOG_SUFFIX
-    test_report_path = os.path.join(test_report_path, test_filename)
-    if pytest:
-        test_report_path = test_report_path.replace('python-unittest', 'python-pytest')
-        os.makedirs(test_report_path, exist_ok=True)
-        test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
-        return test_report_path
-    os.makedirs(test_report_path, exist_ok=True)
-    return test_report_path
-
-
 def sanitize_pytest_xml(xml_file: str):
     # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
     # consider somehow modifying the XML logger in conftest to do this instead
@@ -1270,9 +1262,8 @@ def run_tests(argv=UNITTEST_ARGS):
     elif USE_PYTEST:
         pytest_args = argv + ["--use-main-module"]
         if TEST_SAVE_XML:
-            test_report_path = get_report_path(pytest=True)
-            print(f'Test results will be stored in {test_report_path}')
-            pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+            print(f'Test results will be stored in {TEST_SAVE_XML}')
+            pytest_args.append(f'--junit-xml-reruns={TEST_SAVE_XML}')
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
@@ -1280,7 +1271,7 @@ def run_tests(argv=UNITTEST_ARGS):
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
         if TEST_SAVE_XML:
-            sanitize_pytest_xml(test_report_path)
+            sanitize_pytest_xml(TEST_SAVE_XML)
 
         if not RERUN_DISABLED_TESTS:
             # exitcode of 5 means no tests were found, which happens since some test configs don't
@@ -1319,12 +1310,11 @@ def run_tests(argv=UNITTEST_ARGS):
             def printErrors(self) -> None:
                 super().printErrors()
                 self.printErrorList("XPASS", self.unexpectedSuccesses)
-        test_report_path = get_report_path()
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
-            print(f'Test results will be stored in {test_report_path}')
+            print(f'Test results will be stored in {TEST_SAVE_XML}')
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
+            output=TEST_SAVE_XML,
             verbosity=2 if verbose else 1,
             resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:

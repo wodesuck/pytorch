@@ -625,6 +625,13 @@ def run_test_retries(
         with open(output_file) as f:
             return "".join(f.readlines()[-40:])
 
+    def get_test_report_path():
+        source = env.get("TEST_REPORT_SOURCE_OVERRIDE", "python-pytest")
+        sanitized_invoking_file = sanitize_file_name(invoking_file)
+        path = REPO_ROOT / "test" / "test-reports" / source / sanitized_invoking_file / f"{sanitized_invoking_file}-{os.urandom(8).hex()}.xml"
+        os.makedirs(path.parent, exist_ok=True)
+        return path
+
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
     step_current_file = (
@@ -632,8 +639,9 @@ def run_test_retries(
     )
     while True:
         start = time.time()
+        test_report_path = get_test_report_path()
         ret_code, _ = retry_shell(
-            command + [sc_command] + print_items,
+            command + [sc_command] + print_items + [f"--save-xml={test_report_path}"],
             test_directory,
             stdout=output,
             stderr=output,
@@ -663,13 +671,15 @@ def run_test_retries(
 
         if ret_code != 0 and cache["pytest_previous_status"] == 0:
             # Failed after exiting
-            # manually create xml entry
-            make_manual_xml(
-                invoking_file,
-                cache["ended_at"],
-                duration,
-                get_last_lines() + "\nFailed at exit?",
-            )
+            # Remove old xml since it is incorrect
+            os.remove(test_report_path)
+            if len(cache["prev_run"]) == 0:
+                make_manual_xml(
+                    invoking_file,
+                    cache["ended_at"],
+                    duration,
+                    get_last_lines() + "\nFailed at exit?",
+                )
 
             cache["to_run"] = [[x, get_rerun(y)] for x, y in cache["prev_run"]] + cache[
                 "to_run"
