@@ -914,7 +914,7 @@ def get_report_path(pytest=False):
     test_filename = sanitize_test_filename(sys.argv[0])
 
     source = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE', 'python-unittest' if not pytest else 'python-pytest')
-    test_report_path = os.path.join('test-reports', source + LOG_SUFFIX, test_filename)
+    test_report_path = os.path.join('test-reports', source, test_filename)
     os.makedirs(test_report_path, exist_ok=True)
     if pytest:
         test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
@@ -935,7 +935,6 @@ parser.add_argument('--save-xml', nargs='?', type=str,
                     const=get_report_path(),
                     default=get_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
-parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
@@ -971,7 +970,6 @@ RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
-LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
 USE_PYTEST = args.use_pytest
@@ -1257,7 +1255,8 @@ def run_tests(argv=UNITTEST_ARGS):
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
+            # Bad behavior with save xml paths.  TODO: remove this in favor of using run_test.py
+            command = [sys.executable] + argv + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
