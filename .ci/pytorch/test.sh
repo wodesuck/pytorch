@@ -172,6 +172,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/umf/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/umf/latest/env/vars.sh
+  fi
   # Check XPU status before testing
   xpu-smi discovery
 fi
