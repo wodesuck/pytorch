@@ -628,7 +628,14 @@ def run_test_retries(
     def get_test_report_path():
         source = env.get("TEST_REPORT_SOURCE_OVERRIDE", "python-pytest")
         sanitized_invoking_file = sanitize_file_name(invoking_file)
-        path = REPO_ROOT / "test" / "test-reports" / source / sanitized_invoking_file / f"{sanitized_invoking_file}-{os.urandom(8).hex()}.xml"
+        path = (
+            REPO_ROOT
+            / "test"
+            / "test-reports"
+            / source
+            / sanitized_invoking_file
+            / f"{sanitized_invoking_file}-{os.urandom(8).hex()}.xml"
+        )
         os.makedirs(path.parent, exist_ok=True)
         return path
 
@@ -673,7 +680,7 @@ def run_test_retries(
             # Failed after exiting
             # Remove old xml since it is incorrect
             os.remove(test_report_path)
-            if len(cache["prev_run"]) == 0:
+            if len(cache["prev_run"]) == 1:
                 make_manual_xml(
                     invoking_file,
                     cache["ended_at"],
