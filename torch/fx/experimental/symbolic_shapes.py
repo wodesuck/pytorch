@@ -5314,6 +5314,8 @@ class ShapeEnv:
         self, e: SympyBoolean
     ) -> Tuple[Tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...]:
         """Given a expression, it returns a list of predicates that follow from it"""
+        # This function assumes that the input is already simplified, and hence implications 
+        # can be created without further simplifications in many cases by passing evaluate=False.
         equiv: Dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
         def add_expr(expr: SympyBoolean) -> None:
