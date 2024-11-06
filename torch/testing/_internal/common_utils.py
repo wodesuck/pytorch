@@ -1214,7 +1214,8 @@ def run_tests(argv=UNITTEST_ARGS):
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
         if TEST_SAVE_XML:
-            other_args += ['--save-xml', args.save_xml]
+            new_xml = "".join(TEST_SAVE_XML.split(".")[:-1] + [f"{os.urandom(8).hex()}.xml"])
+            other_args += [f'--save-xml={new_xml}']
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
