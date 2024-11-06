@@ -105,7 +105,7 @@ Tensor NestedTensor_relu(const Tensor& self) {
   return map_nt(self, at::relu);
 }
 
-Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
+Tensor& NestedTensor_gelu_(Tensor& self, std::string_view approximate) {
   auto self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
@@ -113,7 +113,7 @@ Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
   return self;
 }
 
-Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
+Tensor NestedTensor_gelu(const Tensor& self, std::string_view approximate) {
   return map_nt(
       self,
       [approximate](const Tensor& buffer) {

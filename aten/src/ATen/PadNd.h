@@ -11,7 +11,7 @@ enum class padding_mode {
   constant,
 };
 
-static inline c10::string_view padding_mode_string(padding_mode m) {
+static inline std::string_view padding_mode_string(padding_mode m) {
   switch (m) {
     case padding_mode::reflect:
       return "reflect";
