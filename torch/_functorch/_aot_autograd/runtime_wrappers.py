@@ -1891,15 +1891,63 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             "The grad inputs should be same number as forward output tangents"
                         )
 
-                    flat_processed_tangents = list(
+                    _num_mutated_inp_runtime = (
+                        CompiledFunction.metadata.num_mutated_inp_runtime_indices
+                    )
+
+                    flat_processed_tangents: List[torch.Tensor] = []
+                    if _num_mutated_inp_runtime > 0:
+
+                        def subclass_zero_leaves(
+                            meta: SubclassCreationMeta,
+                            output_append_list: List[torch.Tensor],
+                        ):
+                            for attr_meta in meta.attrs.values():
+                                if isinstance(attr_meta, SubclassCreationMeta):
+                                    subclass_zero_leaves(attr_meta, output_append_list)
+                                else:
+                                    assert attr_meta.shape_dtype_device is not None
+                                    output_append_list.append(
+                                        torch.zeros(
+                                            attr_meta.shape_dtype_device[0],
+                                            dtype=attr_meta.shape_dtype_device[1],
+                                            device=attr_meta.shape_dtype_device[2],
+                                        )
+                                    )
+
+                        for t, m in zip(
+                            tangents[:_num_mutated_inp_runtime],
+                            CompiledFunction.metadata.subclass_tangent_meta[
+                                :_num_mutated_inp_runtime
+                            ],
+                        ):
+                            if isinstance(m, SubclassCreationMeta):
+                                if type(t) == torch.Tensor:
+                                    # Autograd deduced that this tangent does not participate in backward computation.
+                                    # And returns zero tensor instead of subclass tangent.
+                                    subclass_zero_leaves(m, flat_processed_tangents),
+                                else:
+                                    flat_processed_tangents.extend(
+                                        AOTDispatchAutograd.process_runtime_tangent(
+                                            t, m
+                                        )[1]
+                                    )
+                            else:
+                                flat_processed_tangents.append(t)
+
+                    flat_processed_tangents += list(
                         itertools.chain.from_iterable(
-                            AOTDispatchAutograd.process_runtime_tangent(
-                                t,
-                                m,
-                            )[1]
+                            (
+                                AOTDispatchAutograd.process_runtime_tangent(
+                                    t,
+                                    m,
+                                )[1]
+                            )
                             for t, m in zip(
-                                tangents,
-                                CompiledFunction.metadata.subclass_tangent_meta,
+                                tangents[_num_mutated_inp_runtime:],
+                                CompiledFunction.metadata.subclass_tangent_meta[
+                                    _num_mutated_inp_runtime:
+                                ],
                             )
                         )
                     )
