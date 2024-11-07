@@ -812,11 +812,11 @@ class BuildExtension(build_ext):
             output_dir = os.path.abspath(output_dir)
 
             # Note [Absolute include_dirs]
-            # Convert relative path in self.compiler.include_dirs to absolute path if any,
-            # For ninja build, the build location is not local, the build happens
-            # in a in script created build folder, relative path lost their correctness.
+            # Convert relative path in self.compiler.include_dirs to absolute path if any.
+            # For ninja build, the build location is not local, but instead, the build happens
+            # in a script-created build folder. Thus, relative paths lose their correctness.
             # To be consistent with jit extension, we allow user to enter relative include_dirs
-            # in setuptools.setup, and we convert the relative path to absolute path here
+            # in setuptools.setup, and we convert the relative path to absolute path here.
             convert_to_absolute_paths_inplace(self.compiler.include_dirs)
 
             _, objects, extra_postargs, pp_opts, _ = \
@@ -904,6 +904,7 @@ class BuildExtension(build_ext):
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
         # cpython-37m-x86_64-linux-gnu.
         ext_filename = super().get_ext_filename(ext_name)
+        print(f"{ext_filename=} was returned from super call")
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
@@ -913,6 +914,7 @@ class BuildExtension(build_ext):
             # Omit the second to last element.
             without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
             ext_filename = '.'.join(without_abi)
+        print(f"Now about to return {ext_filename=} in our own get_ext_filename")
         return ext_filename
 
     def _check_abi(self) -> Tuple[str, TorchVersion]:
@@ -994,7 +996,9 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('c10')
     libraries.append('torch')
     libraries.append('torch_cpu')
-    libraries.append('torch_python')
+    if not kwargs.get('py_limited_api', False):
+        # torch_python uses more than the python limited api
+        libraries.append('torch_python')
     if IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
@@ -1041,7 +1045,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     By default the extension will be compiled to run on all archs of the cards visible during the
     building process of the extension, plus PTX. If down the road a new card is installed the
     extension may need to be recompiled. If a visible card has a compute capability (CC) that's
-    newer than the newest version for which your nvcc can build fully-compiled binaries, Pytorch
+    newer than the newest version for which your nvcc can build fully-compiled binaries, PyTorch
     will make nvcc fall back to building kernels with the newest version of PTX your nvcc does
     support (see below for details on PTX).
 
@@ -1085,7 +1089,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     An exception to this rule is "dynamic parallelism" (nested kernel launches)  which is not used a lot anymore.
     `Relocatable device code` is less optimized so it needs to be used only on object files that need it.
     Using `-dlto` (Device Link Time Optimization) at the device code compilation step and `dlink` step
-    help reduce the protentional perf degradation of `-rdc`.
+    helps reduce the protentional perf degradation of `-rdc`.
     Note that it needs to be used at both steps to be useful.
 
     If you have `rdc` objects you need to have an extra `-dlink` (device linking) step before the CPU symbol linking step.
@@ -1114,7 +1118,9 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('c10')
     libraries.append('torch')
     libraries.append('torch_cpu')
-    libraries.append('torch_python')
+    if not kwargs.get('py_limited_api', False):
+        # torch_python uses more than the python limited api
+        libraries.append('torch_python')
     if IS_HIP_EXTENSION:
         libraries.append('amdhip64')
         libraries.append('c10_hip')
@@ -1381,6 +1387,10 @@ def _get_pybind11_abi_build_flags():
     # that can cause a hard to debug segfaults.
     # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
     # captured during PyTorch native library compilation in torch/csrc/Module.cpp
+    #
+    # Note that these flags don't have side effects even if the PyTorch extension does not
+    # require nor use pybind, so we do not do anything differently for them in the py_limited_api
+    # case.
 
     abi_cflags = []
     for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
@@ -1772,7 +1782,8 @@ def _jit_compile(name,
                         build_directory=build_directory,
                         verbose=verbose,
                         with_cuda=with_cuda,
-                        is_standalone=is_standalone)
+                        is_standalone=is_standalone,
+                    )
             elif verbose:
                 print('No modifications detected for re-loaded extension '
                       f'module {name}, skipping build step...', file=sys.stderr)
@@ -1843,7 +1854,8 @@ def _write_ninja_file_and_build_library(
         build_directory: str,
         verbose: bool,
         with_cuda: Optional[bool],
-        is_standalone: bool = False) -> None:
+        is_standalone: bool = False,
+) -> None:
     verify_ninja_availability()
 
     compiler = get_cxx_compiler()
@@ -1926,6 +1938,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('-ltorch')
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
+            print("whatever")
 
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")
