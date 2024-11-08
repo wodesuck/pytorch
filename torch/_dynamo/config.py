@@ -520,6 +520,11 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
 )
 
+# Users can use this flag to enable performing expensive assertion checks that they want
+# to test, but are typically disabled due to their expense. The checks should run only
+# when this is enabled. This flag is turned on for all Dynamo tests by default for now.
+run_extra_validations = False
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 

@@ -562,23 +562,37 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     def __new__(cls, *args, **assumptions):
         from sympy.core.parameters import global_parameters
 
+        import torch._dynamo.config as config
+
         evaluate = assumptions.pop("evaluate", global_parameters.evaluate)
         args = (sympify(arg) for arg in args)
 
-        # first standard filter, for cls.zero and cls.identity
-        # also reshape Max(a, Max(b, c)) to Max(a, b, c)
-
         if evaluate:
             try:
+                # first standard filter, for cls.zero and cls.identity
+                # also reshape Max(a, Max(b, c)) to Max(a, b, c)
                 args = frozenset(cls._new_args_filter(args))  # type: ignore[assignment]
             except ShortCircuit:
                 return cls.zero  # type: ignore[attr-defined]
-            # remove redundant args that are easily identified
-            args = cls._collapse_arguments(args, **assumptions)
-            # find local zeros
-            args = cls._find_localzeros(args, **assumptions)
 
-        args = frozenset(args)
+            unique_atoms_no_constants = cls._unique_atoms_no_constants(args)
+
+            if not unique_atoms_no_constants:
+                # remove redundant args that are easily identified
+                args = cls._collapse_arguments(args, **assumptions)
+
+                # find local zeros
+                args = cls._find_localzeros(args, **assumptions)
+                args = frozenset(args)  # type: ignore[assignment]
+
+            elif config.run_extra_validations:
+                # Test that applying _collapse_arguments and _find_localzeros do not change the result.
+                args_test = cls._collapse_arguments(args, **assumptions)
+                args_test = cls._find_localzeros(args, **assumptions)
+                args_test = frozenset(args)
+                assert Expr.__new__(
+                    cls, *ordered(args_test), **assumptions
+                ) == Expr.__new__(cls, *ordered(args), **assumptions)
 
         if not args:
             return cls.identity  # type: ignore[attr-defined]
@@ -589,7 +603,22 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         # base creation
         obj = Expr.__new__(cls, *ordered(args), **assumptions)
         obj._argset = args
+
         return obj
+
+    @classmethod
+    def _unique_atoms_no_constants(cls, args):
+        """Return true if all atoms in all args are all unique and there are no constants atoms"""
+        seen_symbols = set()
+        for arg in args:
+            for element in arg.atoms():
+                if not isinstance(element, sympy.core.symbol.Symbol):
+                    return False
+                elif element in seen_symbols:
+                    return False
+                else:
+                    seen_symbols.add(element)
+        return True
 
     @classmethod
     def _collapse_arguments(cls, args, **assumptions):
