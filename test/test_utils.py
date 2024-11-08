@@ -391,6 +391,9 @@ class TestCheckpoint(TestCase):
         self.assertEqual(t2.grad, t2_grad)
 
     def test_checkpoint_no_tensors(self):
+        import os
+        import signal
+        os.kill(os.getpid(), signal.SIGUSR1)
         def foo(t1, t2, scale, t3):
             t4 = t1 + t2 * t3
             t5 = t1 * t2 + t3
