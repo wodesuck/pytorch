@@ -1213,9 +1213,6 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args.append("--use-pytest")
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
-        if TEST_SAVE_XML:
-            new_xml = "".join(TEST_SAVE_XML.split(".")[:-1] + [f"{os.urandom(8).hex()}.xml"])
-            other_args += [f'--save-xml={new_xml}']
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1225,10 +1222,11 @@ def run_tests(argv=UNITTEST_ARGS):
         failed_tests = []
 
         for test_case_full_name in test_cases:
+            new_xml = ".".join(TEST_SAVE_XML.split(".")[:-1] + [f"{os.urandom(8).hex()}.xml"])
 
             cmd = (
-                [sys.executable] + [argv[0]] + other_args + argv[1:] +
-                (["--pytest-single-test"] if USE_PYTEST else []) +
+                [sys.executable] + [argv[0]] + other_args + [f"--save-xml={new_xml}"] +
+                argv[1:] + (["--pytest-single-test"] if USE_PYTEST else []) +
                 [test_case_full_name]
             )
             string_cmd = " ".join(cmd)
