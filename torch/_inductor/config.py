@@ -119,8 +119,6 @@ triton_kernel_default_layout_constraint: Literal[
 # incompatible with disable_cpp_codegen
 cpp_wrapper: bool = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
-c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
-
 # dead code elimination
 dce = False
 
