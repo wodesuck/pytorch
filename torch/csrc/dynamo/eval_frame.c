@@ -249,7 +249,7 @@ inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 static inline PyObject* dynamo_call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
-    PyObject* locals,
+    FrameLocalsMapping* locals,
     CacheEntry* cache_entry,
     FrameState* frame_state) {
 
@@ -260,7 +260,7 @@ static inline PyObject* dynamo_call_callback(
   if (frame == NULL) {
     return NULL;
   }
-  frame->locals = locals;
+  frame->locals = framelocals_mapping_to_dict(locals);
 #else
   PyObject* frame = Py_NewRef(_frame);
 #endif
@@ -583,7 +583,7 @@ static PyObject* dynamo__custom_eval_frame(
   }
 
 
-  PyObject *locals = get_framelocals_mapping(frame);
+  FrameLocalsMapping* locals = get_framelocals_mapping(frame);
   PyObject* backend = get_backend(callback);
 
 
@@ -604,7 +604,7 @@ static PyObject* dynamo__custom_eval_frame(
     lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
     _pytorch_record_function_exit(rf);
 
-    Py_DECREF(locals);
+    framelocals_mapping_free(locals);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
@@ -643,7 +643,7 @@ static PyObject* dynamo__custom_eval_frame(
   if (maybe_cached_code == NULL) {
     // Python error
     *should_clear_frame = 1;
-    Py_DECREF(locals);
+    framelocals_mapping_free(locals);
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -652,7 +652,7 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    Py_DECREF(locals);
+    framelocals_mapping_free(locals);
     return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag);
   }
   // cache miss
@@ -660,7 +660,7 @@ static PyObject* dynamo__custom_eval_frame(
   FrameState* frame_state = extract_frame_state(extra);
   PyObject* result =
       dynamo_call_callback(callback, frame, locals, cache_entry, frame_state);
-  Py_DECREF(locals);
+  framelocals_mapping_free(locals);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of

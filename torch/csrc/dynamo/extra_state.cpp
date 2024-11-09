@@ -111,13 +111,12 @@ bool backend_match(PyObject* saved_backend, PyObject* backend) {
 
 void lookup(
     ExtraState* extra_state,
-    PyObject* f_locals,
+    FrameLocalsMapping* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
     const char** trace_annotation) {
   size_t index = 0;
   CacheEntry* found = nullptr;
-  py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
@@ -131,10 +130,12 @@ void lookup(
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
+          py::dict f_locals_dict = py::reinterpret_steal<py::object>(
+              (PyObject*)framelocals_mapping_to_dict(f_locals));
           guard_error_hook_handle(
               cache_entry.guard_manager,
               cache_entry.code,
-              locals,
+              f_locals_dict,
               index,
               index == extra_state->cache_entry_list.size() - 1);
         }
