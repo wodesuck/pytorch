@@ -247,33 +247,54 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_, operator.and_, operator.or_}
+        boolean_ops = {operator.not_}
         as_bool = op in boolean_ops
+
+        def wrap(a) -> z3.ExprRef:
+            if isinstance(a, (z3.ArithRef, z3.BoolRef)):
+                return a
+            # Convert it into a Z3 value, if it is some of the supported
+            # types below.
+            if isinstance(a, bool) or (as_bool and isinstance(a, int)):
+                return z3.BoolVal(bool(a))
+            if isinstance(a, (int, sympy.Integer)):
+                return z3.IntVal(int(a))
+            if isinstance(a, (float, sympy.Float)):
+                return z3.RealVal(float(a))
+            raise ValueError(f"can't lift type: {type(a)}")
+
+        def wrap_args(args, wrap_fn):
+            # Lifts the arguments into a list of Z3 inhabitants.
+            if len(args) == 1 and isinstance(args[0], (list, tuple)):
+                return (tuple(wrap_fn(a) for a in args[0]),)
+            else:
+                return tuple(wrap_fn(a) for a in args)
 
         # Lifts the function into 'z3.ExprRef' domain.
         def lift(func):
-            def wrap(a) -> z3.ExprRef:
-                if isinstance(a, (z3.ArithRef, z3.BoolRef)):
-                    return a
-                # Convert it into a Z3 value, if it is some of the supported
-                # types below.
-                if isinstance(a, bool) or (as_bool and isinstance(a, int)):
-                    return z3.BoolVal(bool(a))
-                if isinstance(a, (int, sympy.Integer)):
-                    return z3.IntVal(int(a))
-                if isinstance(a, (float, sympy.Float)):
-                    return z3.RealVal(float(a))
-                raise ValueError(f"can't lift type: {type(a)}")
-
             @functools.wraps(func)
             def wrapper(*args):
-                # Lifts the arguments into a list of Z3 inhabitants.
-                if len(args) == 1 and isinstance(args[0], (list, tuple)):
-                    wrapped_args = (tuple(wrap(a) for a in args[0]),)
-                else:
-                    wrapped_args = tuple(wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
-                return func(*wrapped_args)
+                return func(*wrap_args(args, wrap))
+
+            return wrapper
+
+        # Like `lift`, but for bitwise ops. We need to convert to/from BitVec
+        # in order to use z3 bitwise ops. We assume that integers are 64 bit.
+        def bitwise_lift(bitwise_func, bool_func):
+            @functools.wraps(bitwise_func)
+            def wrapper(*args):
+                wrapped_args = wrap_args(args, wrap)
+                # Run the function on the Z3 expressions.
+                if bool_func is not None and all(
+                    isinstance(arg, z3.BoolRef) for arg in wrapped_args
+                ):
+                    return bool_func(*wrapped_args)
+
+                def to_bv(a):
+                    return z3.Int2BV(a, 64)
+
+                return z3.BV2Int(bitwise_func(*wrap_args(wrapped_args, to_bv)))
 
             return wrapper
 
@@ -281,8 +302,10 @@ try:
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
-            operator.and_: lift(z3.And),
-            operator.or_: lift(z3.Or),
+            operator.and_: bitwise_lift(operator.and_, z3.And),
+            operator.rshift: bitwise_lift(operator.rshift, None),
+            operator.lshift: bitwise_lift(operator.lshift, None),
+            operator.or_: bitwise_lift(operator.or_, z3.Or),
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
