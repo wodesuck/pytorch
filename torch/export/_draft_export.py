@@ -1,6 +1,8 @@
 import inspect
 import logging
 import sys
+from collections import defaultdict
+from dataclasses import dataclass
 from enum import IntEnum
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -89,11 +91,63 @@ class FailureReport:
     def print(self, str_to_filename: Dict[str, str]) -> str:
         if self.failure_type == FailureType.MISSING_FAKE_KERNEL:
             op = self.data["op"]
+            op_profiles = self.data["op_profiles"]
+
+            def get_sorted_strides(strides: List[int]) -> List[int]:
+                strides = [(s, idx) for idx, s in enumerate(strides)]
+                strides.sort()
+                return [idx for _, idx in strides]
+
+            op_module, op_name, op_overload = op.split(".")
+            call_str = '\n            get_fake_out({dim}, {sorted_strides}, {dtype}, "{device}", {layout}),'
+            call_get_fake_out_str = [
+                call_str.format(
+                    dim=len(profile.shape),
+                    sorted_strides=get_sorted_strides(profile.strides),
+                    dtype=profile.dtype,
+                    device=profile.device,
+                    layout=profile.layout,
+                )
+                for profile in op_profiles[0].flat_out_profile
+            ]
+            call_get_fake_out_str = "\n".join(call_get_fake_out_str)
 
             return f"""Missing fake kernel.
     torch.ops.{op} is missing a fake kernel implementation.
 
-    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
+    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to implement a fake kernel.
+
+    Here is an example of a fake kernel for your op, but it might not be correct for all use cases:
+    ```
+    import torch.utils._pytree as pytree
+
+    @torch.library.register_fake("{op_module}::{op_name}")
+    def {op.replace(".", "_")}_fake(*args, **kwargs):
+        ctx = torch.library.get_ctx()
+
+        # Generate fake tensor for each output
+        def get_fake_out(dim, sorted_strides, dtype, device, layout):
+            fake_shape = [ctx.new_dynamic_size() for _ in range(dim)]
+
+            fake_strides = [-1] * dim
+            fake_stride = 1
+            for idx in sorted_strides:
+                fake_strides[idx] = fake_stride
+                fake_stride = fake_stride * fake_shape[idx]
+
+            return torch.empty_strided(
+                size=fake_shape, stride=fake_strides, dtype=dtype, device=device, layout=layout
+            )
+
+        # Loop through all the flat outputs from the profiling
+        flat_fake_out = [{call_get_fake_out_str}
+        ]
+
+        # Unflatten the outputs to be the same output structure as the eager model
+        return pytree.tree_unflatten(
+            flat_fake_out, pytree.treespec_loads(\'{op_profiles[0].out_spec}\')
+        )
+    ```
 """  # noqa: B950
 
         elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
@@ -192,6 +246,42 @@ class CaptureStructuredTrace(logging.Handler):
                 self.logs.append((key, metadata[key]))
 
 
+@dataclass(frozen=True)
+class TensorMetadata:
+    shape: Tuple[int]
+    strides: Tuple[int]
+    dtype: torch.dtype
+    device: torch.device
+    layout: torch.layout
+
+    def __eq__(self, other: object) -> bool:
+        assert isinstance(other, TensorMetadata)
+        return (
+            len(self.shape) == len(other.shape)
+            and self.dtype == other.dtype
+            and self.device == other.device
+            and self.layout == other.layout
+        )
+
+    def __hash__(self: "TensorMetadata") -> int:
+        return hash(
+            (
+                ("shape", hash(len(self.shape))),
+                ("dtype", hash(self.dtype)),
+                ("device", hash(self.device)),
+                ("layout", hash(self.layout)),
+            )
+        )
+
+
+@dataclass(frozen=True)
+class OpProfile:
+    flat_args_profile: Tuple[TensorMetadata, ...]
+    args_spec: str
+    flat_out_profile: Tuple[TensorMetadata, ...]
+    out_spec: str
+
+
 def draft_export(
     mod: torch.nn.Module,
     args: Tuple[Any, ...],
@@ -239,7 +329,9 @@ def draft_export(
 
         str_to_filename: Dict[str, str] = {}
         failures: List[FailureReport] = []
-        custom_ops_logs: Dict[str, Dict[str, Any]] = {}  # Dedup custom ops
+        custom_ops_logs: Dict[str, List[Dict[str, Any]]] = defaultdict(
+            list
+        )  # Dedup custom ops
         data_dependent_logs: Dict[
             str, Dict[str, Any]
         ] = {}  # Dedup data dependent errors based on stacktrace
@@ -279,12 +371,8 @@ def draft_export(
                 log_contents["new_dynamic_shapes"] = new_shapes
 
             elif log_name == "generated_fake_kernel":
-                if log_contents["op"] in custom_ops_logs:
-                    continue
-
-                failure_type = FailureType.MISSING_FAKE_KERNEL
-                custom_ops_logs[log_contents["op"]] = log_contents
-
+                custom_ops_logs[log_contents["op"]].append(log_contents["op_profile"])
+                continue
             else:
                 raise RuntimeError(f"Unknown log name: {log_name}")
 
@@ -293,6 +381,34 @@ def draft_export(
                 FailureReport(
                     failure_type,
                     log_contents,
+                )
+            )
+
+        for op, op_profiles in custom_ops_logs.items():
+            seen_profiles = set()
+            for op_profile in op_profiles:
+                new_op_profile = OpProfile(
+                    flat_args_profile=tuple(
+                        [
+                            TensorMetadata(**contents)
+                            for contents in op_profile["flat_args_profile"]
+                        ]
+                    ),
+                    args_spec=op_profile["args_spec"],
+                    flat_out_profile=tuple(
+                        [
+                            TensorMetadata(**contents)
+                            for contents in op_profile["flat_out_profile"]
+                        ]
+                    ),
+                    out_spec=op_profile["out_spec"],
+                )
+                seen_profiles.add(new_op_profile)
+
+            failures.append(
+                FailureReport(
+                    FailureType.MISSING_FAKE_KERNEL,
+                    {"op": op, "op_profiles": list(seen_profiles)},
                 )
             )
 
