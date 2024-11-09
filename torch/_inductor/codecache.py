@@ -1708,11 +1708,12 @@ class CompiledFxGraph:
 
 
 def run_command_and_check(cmd_: str) -> None:
-    cmd = shlex.split(cmd_)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
 
 
 @functools.lru_cache(None)
@@ -2006,7 +2007,8 @@ class AotCodeCompiler:
                     compile_file(input_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
-                    run_command_and_check(compile_cmd)
+                    with dynamo_timed("run_compile_cmd", log_pt2_compile_event=True):
+                        run_command_and_check(compile_cmd)
 
             if config.aot_inductor.package:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
@@ -2021,7 +2023,8 @@ class AotCodeCompiler:
                 )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
-            consts_o = _compile_consts(aot_constants, sys.platform)
+            with dynamo_timed("run_compile_consts", log_pt2_compile_event=True):
+                consts_o = _compile_consts(aot_constants, sys.platform)
             kernels_o = []
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
@@ -2081,7 +2084,8 @@ class AotCodeCompiler:
                     compile_file([output_o, consts_o], output_so, link_cmd.split())
                     os.chmod(output_so, 0o755)
                 else:
-                    run_command_and_check(link_cmd)
+                    with dynamo_timed("run_link_cmd", log_pt2_compile_event=True):
+                        run_command_and_check(link_cmd)
 
                 for o_file in [
                     output_o,

@@ -861,15 +861,20 @@ class CachingAutotuner(KernelInterface):
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
-        start_time = time.time_ns()
-        timings = self.benchmark_all_configs(*args, **kwargs)
-        benchmark_time_taken_ns = time.time_ns() - start_time
-        self.launchers = [builtins.min(timings, key=timings.get)]
-        self.autotune_time_taken_ns = (
-            self.precompile_time_taken_ns + benchmark_time_taken_ns
-        )
-        if self.save_cache_hook:
-            self.save_cache_hook(self.launchers[0].config, self.autotune_time_taken_ns)
+        with dynamo_timed(
+            "CachingAutotuner.autotune_to_one_config", log_pt2_compile_event=True
+        ):
+            start_time = time.time_ns()
+            timings = self.benchmark_all_configs(*args, **kwargs)
+            benchmark_time_taken_ns = time.time_ns() - start_time
+            self.launchers = [builtins.min(timings, key=timings.get)]
+            self.autotune_time_taken_ns = (
+                self.precompile_time_taken_ns + benchmark_time_taken_ns
+            )
+            if self.save_cache_hook:
+                self.save_cache_hook(
+                    self.launchers[0].config, self.autotune_time_taken_ns
+                )
 
     def save_gpu_kernel(self, grid, stream, launcher):
         if callable(grid):
