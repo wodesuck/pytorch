@@ -1,7 +1,12 @@
 # Owner(s): ["oncall: export"]
 import copy
+from enum import Enum
+from functools import wraps
+
+from parameterized import parameterized_class
 
 import torch
+from torch._export.serde.report import deserialize_report, serialize_report
 from torch.export import Dim
 from torch.export._draft_export import draft_export, FailureType
 from torch.testing import FileCheck
@@ -12,6 +17,46 @@ from torch.testing._internal.torchbind_impls import (
 )
 
 
+class DraftExportTestTypes(str, Enum):
+    BASIC = ""
+    SERDE = "serde"
+
+
+def draft_export_basic(self, *args, **kwargs):
+    return draft_export(*args, **kwargs)
+
+
+def draft_export_serde(self, *args, **kwargs):
+    ep, report = draft_export(*args, **kwargs)
+    return ep, deserialize_report(serialize_report(report))
+
+
+def skip_specific_tests(test_types):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.test_type in test_types:
+                self.skipTest("")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@parameterized_class(
+    [
+        {
+            "test_type": DraftExportTestTypes.BASIC,
+            "draft_export_variant": draft_export_basic,
+        },
+        {
+            "test_type": DraftExportTestTypes.SERDE,
+            "draft_export_variant": draft_export_serde,
+        },
+    ],
+    class_name_func=lambda cls, _, params: f"{cls.__name__}_{params['test_type'].value}",
+)
 class TestDraftExport(TestCase):
     def setUp(self):
         init_torchbind_implementations()
@@ -95,7 +140,7 @@ class TestDraftExport(TestCase):
 
             inp = (torch.ones(3, 3), torch.ones(3, 3))
 
-            ep, report = draft_export(M(), inp)
+            ep, report = self.draft_export_variant(M(), inp)
 
             self.assertEqual(len(report.failures), 1)
             self.assertEqual(
@@ -133,7 +178,7 @@ class TestDraftExport(TestCase):
 
             inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(3))
 
-            ep, report = draft_export(M(), inp)
+            ep, report = self.draft_export_variant(M(), inp)
             self.assertTrue(len(report.failures) > 0)
             self.assertEqual(
                 report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
@@ -174,7 +219,7 @@ class TestDraftExport(TestCase):
                 return x * a
 
         inp = (torch.tensor(3),)
-        ep, report = draft_export(M(), inp)
+        ep, report = self.draft_export_variant(M(), inp)
 
     def test_shape_failure(self):
         class M(torch.nn.Module):
@@ -184,7 +229,9 @@ class TestDraftExport(TestCase):
 
         inp = (torch.ones(3, 3),)
 
-        ep, report = draft_export(M(), inp, dynamic_shapes={"a": {0: Dim("a0")}})
+        ep, report = self.draft_export_variant(
+            M(), inp, dynamic_shapes={"a": {0: Dim("a0")}}
+        )
 
         self.assertEqual(len(report.failures), 1)
         self.assertEqual(
@@ -222,7 +269,7 @@ class TestDraftExport(TestCase):
 
         inp = (torch.ones(3, 3),)
         mod = M()
-        ep, report = draft_export(mod, inp)
+        ep, report = self.draft_export_variant(mod, inp)
         self.assertEqual(mod.a, torch.tensor(2))
         FileCheck().check_count("torch.ops.aten.add.default", 0, exactly=True).run(
             ep.graph_module.code
@@ -238,7 +285,7 @@ class TestDraftExport(TestCase):
                 return x
 
         inp = (torch.ones(3, 3),)
-        ep, report = draft_export(M(), inp)
+        ep, report = self.draft_export_variant(M(), inp)
         self.assertTrue(report.successful())
         self.assertEqual(inp[0], torch.ones(3, 3))
 
@@ -265,7 +312,7 @@ class TestDraftExport(TestCase):
         tq.push(b)
         tq3 = copy.deepcopy(tq)
         inp = (tq, torch.randn(2, 2))
-        ep, report = draft_export(mod, inp)
+        ep, report = self.draft_export_variant(mod, inp)
         self.assertTrue(report.successful())
         self.assertEqual(tq2.size(), 0)
         self.assertEqual(tq3.size(), 2)
