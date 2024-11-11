@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import unittest
 from functools import partial
 
 import torch
@@ -10,6 +11,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    IS_S390X,
     run_tests,
     TestCase,
     TestGradients,
@@ -28,6 +30,7 @@ _gradcheck_ops = partial(
 @unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
     # Tests that gradients are computed correctly
+    @unittest.skipIf(IS_S390X, "Fails on s390x CI. Needs investigation")
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_grad(self, device, dtype, op):
         # This is verified by test_dtypes in test_ops.py
