@@ -60,7 +60,7 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   TORCH_CHECK(
       status == xnn_status_success,
       "defining xnn output failed(", status,")!");
-  
+
   status = xnn_define_unary(
     subgraph_ptr,
     xnn_unary_hardswish,
@@ -81,10 +81,10 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
       "xnn create runtime failed because runtime_ptr is null");
   std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
       runtime_ptr, &xnn_delete_runtime);
-  
+
   std::array<xnn_external_value, 2> external = {
-    xnn_external_value{input_id, input.data_ptr<float>()}, 
-    xnn_external_value{output_id, output.data_ptr<float>()}}; 
+    xnn_external_value{input_id, input.data_ptr<float>()},
+    xnn_external_value{output_id, output.data_ptr<float>()}};
 
   status = xnn_setup_runtime(
     runtime_ptr,

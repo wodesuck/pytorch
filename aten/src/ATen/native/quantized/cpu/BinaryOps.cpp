@@ -284,7 +284,7 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   if (ReLUFused) {
     output_min = 0;
   }
-  
+
   // Create XNNPACK Subgraph
   xnn_subgraph_t subgraph_ptr = nullptr;
   auto status = xnn_create_subgraph(
@@ -296,9 +296,9 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       func_name, ": xnn create subgraph failed(", status,")!");
   std::unique_ptr<xnn_subgraph, decltype(&xnn_delete_subgraph)> subgraph(
       subgraph_ptr, &xnn_delete_subgraph);
-  
+
   uint32_t input0_id = XNN_INVALID_VALUE_ID, input1_id = XNN_INVALID_VALUE_ID, output_id = XNN_INVALID_VALUE_ID;
-  
+
   // Defining the quantized input 0
   status = xnnp_define_q_tensor(
     qa,
@@ -337,20 +337,20 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(
       status == xnn_status_success && output_id != XNN_INVALID_VALUE_ID,
       func_name, ": xnn define output failed(", status,")!");
-  
+
   const struct xnn_binary_params binary_params = {output_min, output_max};
   status = xnn_define_binary(
-    subgraph_ptr, 
-    xnn_binary_add, 
-    &binary_params, 
-    input0_id, 
-    input1_id, 
-    output_id, 
+    subgraph_ptr,
+    xnn_binary_add,
+    &binary_params,
+    input0_id,
+    input1_id,
+    output_id,
     0);
   TORCH_CHECK(
       status == xnn_status_success,
       func_name, ": xnn define binary add failed(", status,")!");
-  
+
   // create runtime
   xnn_runtime_t runtime_ptr = nullptr;
   status = xnn_create_runtime_v2(subgraph_ptr, caffe2::pthreadpool_(), 0, &runtime_ptr);
@@ -362,11 +362,11 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
       func_name, ": xnn create runtime failed because runtime_ptr is null");
   std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
       runtime_ptr, &xnn_delete_runtime);
-  
+
   std::array<xnn_external_value, 3> external = {
     xnn_external_value{input0_id, reinterpret_cast<void*>(qa_contig.data_ptr<scalar_t>())},
     xnn_external_value{input1_id, reinterpret_cast<void*>(qb_contig.data_ptr<scalar_t>())},
-    xnn_external_value{output_id, reinterpret_cast<void*>(qy.data_ptr<scalar_t>())}}; 
+    xnn_external_value{output_id, reinterpret_cast<void*>(qy.data_ptr<scalar_t>())}};
 
   status = xnn_setup_runtime(
     runtime_ptr,

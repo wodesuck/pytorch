@@ -64,7 +64,7 @@ Tensor global_average_pool(const Tensor& input) {
   std::unique_ptr<xnn_subgraph, decltype(&xnn_delete_subgraph)> subgraph(
       subgraph_ptr, &xnn_delete_subgraph);
   uint32_t input_id = XNN_INVALID_VALUE_ID, output_id = XNN_INVALID_VALUE_ID;
-  
+
 
   const auto& input_shape = get_mem_format_aware_shape(input_padded_contig_nhwc);
   status = xnn_define_tensor_value(
@@ -121,10 +121,10 @@ Tensor global_average_pool(const Tensor& input) {
       "xnn create runtime failed because runtime_ptr is null");
   std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
       runtime_ptr, &xnn_delete_runtime);
-  
+
   std::array<xnn_external_value, 2> external = {
-    xnn_external_value{input_id, input_padded_contig_nhwc.data_ptr<float>()}, 
-    xnn_external_value{output_id, output.data_ptr<float>()}}; 
+    xnn_external_value{input_id, input_padded_contig_nhwc.data_ptr<float>()},
+    xnn_external_value{output_id, output.data_ptr<float>()}};
 
   status = xnn_setup_runtime(
     runtime_ptr,
@@ -137,7 +137,7 @@ Tensor global_average_pool(const Tensor& input) {
   TORCH_CHECK(
       status == xnn_status_success,
       "xnn invoke runtime failed(", status,")!");
-  
+
   return output.to(input.suggest_memory_format());
 }
 
