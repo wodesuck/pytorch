@@ -222,7 +222,6 @@ def get_branches_with_magic_label_or_open_pr() -> Set[str]:
 
 
 def delete_branch(repo: GitRepo, branch: str) -> None:
-    return
     repo._run_git("push", "origin", "-d", branch)
 
 
