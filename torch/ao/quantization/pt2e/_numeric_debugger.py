@@ -5,6 +5,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
+from torch.ao.quantization.pt2e.graph_utils import get_control_flow_submodules
 from torch.fx import GraphModule, Node
 from torch.nn import functional as F
 
@@ -29,16 +30,25 @@ def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
         )
     unique_id += 1
 
-    for node in graph_module.graph.nodes:
-        if node.op in ["output", "placeholder"]:
-            continue
+    queue = [graph_module]
+    while queue:
+        current_graph_module = queue.pop(0)
+        for node in graph_module.graph.nodes:
+            if node.op in ["output", "placeholder"]:
+                continue
 
-        if CUSTOM_KEY not in node.meta:
-            node.meta[CUSTOM_KEY] = {}
+            if CUSTOM_KEY not in node.meta:
+                node.meta[CUSTOM_KEY] = {}
 
-        if NUMERIC_DEBUG_HANDLE_KEY not in node.meta[CUSTOM_KEY]:
-            node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = unique_id
-            unique_id += 1
+            if NUMERIC_DEBUG_HANDLE_KEY not in node.meta[CUSTOM_KEY]:
+                node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = unique_id
+                unique_id += 1
+
+        control_flow_submodules = [
+            submodule
+            for _, submodule, _ in get_control_flow_submodules(current_graph_module)
+        ]
+        queue.extend(control_flow_submodules)
 
 
 class OutputLogger(torch.nn.Module):
