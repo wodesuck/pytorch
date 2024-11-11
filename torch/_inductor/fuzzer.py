@@ -19,6 +19,7 @@ from typing import (
 
 import torch
 from torch._inductor.custom_graph_pass import CustomGraphPass
+from torch._inductor.scheduler import BaseSchedulerNode
 
 
 """
@@ -85,9 +86,7 @@ class DummyPass(CustomGraphPass):
 TYPE_EXEMPLARS: dict[str, Any] = {
     CustomGraphPass.__name__: DummyPass(),
     torch.fx.graph.Graph.__name__: torch.fx.graph.Graph(),
-    torch._inductor.scheduler.BaseSchedulerNode.__name__: torch._inductor.scheduler.BaseSchedulerNode(
-        None
-    ),
+    BaseSchedulerNode.__name__: BaseSchedulerNode(None),
 }
 
 
