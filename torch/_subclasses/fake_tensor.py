@@ -619,11 +619,6 @@ class FakeTensor(Tensor):
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
 
-    # We expect nested_int_memo to be None when an offsets is a graph
-    # intermediate, or an input that has never been associated with a
-    # nested int.
-    nested_int_memo = SymNumberMemoDescriptor(is_nested_int=True)
-
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -891,18 +886,6 @@ class FakeTensor(Tensor):
 
         return common_device, has_scalar_only_inputs
 
-    def get_nested_int(
-        self,
-        *,
-        coeff: Union[int, torch.SymInt] = 1,
-    ) -> torch.SymInt:
-        if self.nested_int_memo is None:
-            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
-                nt_tensor_id=None
-            )
-        assert isinstance(self.nested_int_memo, torch.SymInt)
-        return self.nested_int_memo * coeff
-
     # Similar to FunctionalTensor.tolist
     def tolist(self) -> Any:
         if self.dim() == 0:
@@ -911,6 +894,15 @@ class FakeTensor(Tensor):
             return [elem.item() for elem in self]
         else:
             return [elem.tolist() for elem in self]
+
+    # Invariant: A fake tensor post-creation is guaranteed to
+    # have any associated symbolic nested int set
+    def detach(self) -> torch.Tensor:  # type: ignore[override]
+        out = torch.ops.aten.detach.default(self)
+        fake_mode = self.fake_mode
+        if self in fake_mode.nested_meta_to_cache_id:
+            fake_mode.nested_meta_to_cache_id[out] = fake_mode.nested_meta_to_cache_id[self]
+        return out
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1112,8 +1104,13 @@ class FakeTensorMode(TorchDispatchMode):
     # The initial count is set to the current eager tensor_id_counter value
     # upon initialization, and every time you retrace using the same fake tensor
     # mode, you should reset the counter to the initial count.
-    nt_tensor_id_counter: int = -1
-    nt_tensor_id_initial_count: int = -1
+    cache_id_counter: int = -1
+    cache_id_initial_count: int = -1
+    # keeps the cache alive for the duration of the mode
+    # TODO(soulitzer): Should this be reset if the id is also reset?
+    cache_id_to_fake_cache = {}
+    cache_id_to_symint = {}
+    nested_meta_to_cache_id = {}
 
     def __init__(
         self,
@@ -1205,13 +1202,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         import torch.nested._internal.nested_tensor
 
-        self.nt_tensor_id_initial_count = (
-            torch.nested._internal.nested_tensor._tensor_id_counter
+        self.cache_id_initial_count = (
+            torch.nested._internal.nested_tensor._cache_registry._cache_id_counter
         )
-        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+        self.cache_id_counter = self.cache_id_initial_count
+        self.cache_id_to_fake_cache = {}
+        self.cache_id_to_symint = {}
 
-    def reset_nt_tensor_id_counter(self) -> None:
-        self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
+    def reset_cache_id_counter(self) -> None:
+        self.cache_id_counter = self.cache_id_initial_count
 
     # Typically, there is only one fake tensor mode and you test for it by
     # doing an isinstance test.  However, in some situations, there might be
@@ -2330,22 +2329,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
-    def create_symbolic_nested_int(
-        self, *, nt_tensor_id: Optional[int] = None
-    ) -> torch.SymInt:
-        # See Note: [Creating symbolic nested int]
-        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+    def create_nested_symint(self, cache) -> torch.SymInt:
         import torch.nested._internal.nested_tensor
+        from torch.nested._internal.nested_int import NestedIntNode
 
-        if nt_tensor_id is None:
-            nt_tensor_id = self.nt_tensor_id_counter
-            assert self.enter_stack, "should only called while FakeTensorMode is active"
-            self.nt_tensor_id_counter += 1
-        hint = torch._C._get_nested_int(nt_tensor_id, 1)
+        hint = SymInt(NestedIntNode(cache=cache, coeff=1))
 
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         assert self.shape_env is not None
-        ret = self.shape_env.create_symintnode(
+        nested_symint = self.shape_env.create_symintnode(
             sym=self.shape_env.create_symbol(
                 val=hint,
                 source=src,
@@ -2353,7 +2345,58 @@ class FakeTensorMode(TorchDispatchMode):
             hint=hint,
             source=src,
         )
-        return ret
+        self.cache_id_to_symint[cache.id] = nested_symint
+
+    def get_nested_symint(
+        self, cache, *, coeff=1
+    ) -> torch.SymInt:
+        # Assume that the cache exists and is registered.
+        # See Note: [Creating symbolic nested int]
+        if cache.id not in self.cache_id_to_symint:
+            self.create_nested_symint(cache)
+        return self.cache_id_to_symint[cache.id] * coeff
+
+    def get_nested_cache_id(self, data) -> None:
+        from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+        cache_id = None
+        for v in data.values():
+            v = mb_unwrap_functional_tensor(v)
+            if v in self.nested_meta_to_cache_id:
+                cache_id = self.nested_meta_to_cache_id.get(v)
+                # Could the same metadata belong in multiple caches?
+                break
+        if cache_id is None:
+            cache_id = self.cache_id_counter
+            self.cache_id_counter += 1
+
+            for v in data.values():
+                v = mb_unwrap_functional_tensor(v)
+                self.nested_meta_to_cache_id[v] = cache_id
+        return cache_id
+
+    def get_nested_cache(self, data, cache_id=None) -> None:
+        from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+
+        # Try to figure out what the cache_id from the metadata
+        if cache_id is None:
+            # There are two ways two construct either, I already have a cache_id
+            # from eager, or I am creating in the middle of the graph and need a new one.
+            cache_id = self.get_nested_cache_id(data)
+
+        # TODO(soulitzer): When can I have a cache_id that is not in the cache?
+        if cache_id not in self.cache_id_to_fake_cache:
+            from torch.nested._internal.nested_tensor import MetadataCache
+            # TODO(soulitzer): why cannot we have this assertion?
+            # assert self.enter_stack, "should only called while FakeTensorMode is active"
+            cache = MetadataCache(data=data, id=cache_id, fake_mode=self)
+            self.cache_id_to_fake_cache[cache_id] = cache
+
+            for v in data.values():
+                v = mb_unwrap_functional_tensor(v)
+                self.nested_meta_to_cache_id[v] = cache_id
+
+        return self.cache_id_to_fake_cache[cache_id]
 
     _cpp_meta_supports_symint = ordered_set(
         aten.empty.memory_format,

@@ -2731,7 +2731,6 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
 
-
 def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
@@ -2744,3 +2743,9 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t, dtype=torch.int64)
     else:
         return torch.as_tensor(t)
+
+# Making naming consistent?
+def _get_njt_cache_from_offsets(offsets):
+    from torch.nested._internal.nested_tensor import _cache_registry
+
+    return _cache_registry.get_cache_from_meta(offsets)

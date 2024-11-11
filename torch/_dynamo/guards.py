@@ -107,6 +107,7 @@ from .source import (
     UnspecializedNNModuleSource,
     UnspecializedParamBufferSource,
     WeakRefCallSource,
+    NestedTensorCacheListSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -1070,6 +1071,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, NestedTensorCacheListSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: torch._get_njt_cache_from_offsets(x).state(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

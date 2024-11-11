@@ -1,34 +1,20 @@
 # mypy: allow-untyped-defs
+import re
 from typing import *  # noqa: F403
+import weakref
 from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.utils.weak import WeakTensorKeyDictionary
 
-
-_tensor_id_counter = 0
-_tensor_symint_registry = WeakTensorKeyDictionary()
-
-
-def get_tensor_symint(tensor, *, coeff=1):
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-
-    # NB: Only FakeTensor is associated with a memo
-    tensor = mb_unwrap_functional_tensor(tensor)
-    if isinstance(tensor, FakeTensor):
-        return tensor.get_nested_int(coeff=coeff)
-
-    global _tensor_id_counter
-
-    tensor_symint = _tensor_symint_registry.get(tensor)
-    if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
-        _tensor_symint_registry[tensor] = tensor_symint
-    return tensor_symint
+from torch.nested._internal.metadata_cache import (
+    add_entry,
+    create_cache,
+    try_get_cache,
+    try_get_entry,
+)
+from torch.nested._internal.nested_int import get_nested_symint
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -48,6 +34,83 @@ def _load_val_from_tensor(t: torch.Tensor):
 # serialization function must be defined at top level
 def _rebuild_njt(constructor_kwargs):
     return NestedTensor(**constructor_kwargs)
+
+
+RAGGED_SOURCE_KEYS = [
+    "cpu_lengths",
+    "cpu_offsets",
+    "device_lengths",
+    "device_offsets",
+]
+
+
+# If we accept the input in the form of offsets/lengths/cpu_offsets/cpu_lengtsh
+# we need to do some normalization at some point. Where should it be done?
+def construct_nested_cache_data(
+    *, offsets=None, lengths=None, cpu_offsets=None, cpu_lengths=None
+):
+    # The device of offsets/lengths determines the device of the NestedTensor.
+    # CPU NestedTensor cannot have device offsets/lengths cached.
+    device_offsets, device_lengths = None, None
+    if offsets is not None:
+        if offsets.is_cpu:
+            cpu_offsets = offsets
+        else:
+            device_offsets = offsets
+    if lengths is not None:
+        if lengths.is_cpu:
+            cpu_lengths = lengths
+        else:
+            device_lengths = lengths
+    raw_ret = {
+        # Duplicate :(
+        "cpu_offsets": cpu_offsets,
+        "cpu_lengths": cpu_lengths,
+        "device_offsets": device_offsets,
+        "device_lengths": device_lengths,
+    }
+    ret = dict()
+    for k, v in raw_ret.items():
+        if v is not None:
+            ret[k] = v
+    return ret
+
+
+def get_nested_cache(offsets, lengths, cpu_offsets, cpu_lengths):
+    # Figure out the best way to do this.
+    cache_data = construct_nested_cache_data(
+        offsets=offsets,
+        lengths=lengths,
+        cpu_offsets=cpu_offsets,
+        cpu_lengths=cpu_lengths,
+    )
+
+    # Look for existing caches
+    caches = []
+    for k in RAGGED_SOURCE_KEYS:
+        if k in cache_data:
+            _cache = try_get_cache(cache_data[k])
+            if _cache is not None:
+                caches.append(_cache)
+
+    # Update/merge/create depending whether existing caches exist
+    cache = None
+    if len(caches) == 0:
+        cache = create_cache(cache_data)
+    else:
+        # Entries already registered to cache are prioritized.
+        cache = caches[0]
+        for cache_ in caches[1:]:
+            for k, v in cache_.data.items():
+                if try_get_entry(cache, k) is None and v is not None:
+                    # view to avoid a single tensor instance shared between caches
+                    add_entry(cache, k, v.view_as(v))
+
+        for k, v in cache_data.items():
+            if try_get_entry(cache, k) is None and v is not None:
+                add_entry(cache, k, v)
+
+    return cache
 
 
 class NestedTensor(torch.Tensor):
@@ -81,6 +144,8 @@ class NestedTensor(torch.Tensor):
         offsets,
         *,
         lengths=None,
+        cpu_offsets=None,
+        cpu_lengths=None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -92,10 +157,15 @@ class NestedTensor(torch.Tensor):
         assert not isinstance(values, NestedTensor)
         assert values.device == offsets.device
 
-        # Query cache for the symint associated with offsets or lengths
-        # (create a new one if needed).
-        ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        # Figure out the best way to do this.
+        cache = get_nested_cache(
+            offsets=offsets,
+            lengths=lengths,
+            cpu_offsets=cpu_offsets,
+            cpu_lengths=cpu_lengths,
+        )
+        ragged_size = get_nested_symint(cache, coeff=1)
+
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         if lengths is not None:
@@ -277,8 +347,6 @@ class NestedTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
-        from torch._subclasses.fake_tensor import FakeTensor
-
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
         values = inner_tensors["_values"]
@@ -293,13 +361,6 @@ class NestedTensor(torch.Tensor):
         if max_seqlen_tensor is not None:
             metadata_cache["max_seqlen"] = max_seqlen_tensor
         ragged_idx = meta["ragged_idx"]
-
-        # Alternatively, we could make it the caller's responsibility to
-        # cache it. But this heuristic seems simple enough.
-        ragged_source = offsets if lengths is None else lengths
-        if isinstance(ragged_source, FakeTensor):
-            ragged_size = outer_size[ragged_idx]
-            ragged_source.nested_int_memo = ragged_size
 
         return NestedTensor(
             values,
