@@ -1429,6 +1429,10 @@ def parse_args():
         action="store_false",
         help="Run tests without translation validation.",
     )
+    parser.add_argument(
+        "--upload-artifacts-while-running",
+        action="store_true",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
