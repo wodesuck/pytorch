@@ -501,11 +501,11 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.g6.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.g6.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.g6.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.g6.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.g6.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
     secrets: inherit
 
