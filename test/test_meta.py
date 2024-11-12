@@ -1755,6 +1755,29 @@ class TestMeta(TestCase):
             meta_tensor = torch.randn(1, device='meta')
             meta_tensor.item()
 
+
+    def test_meta_consistency_out_dtype_mismatch_pow_Tensor_Scalar(self):
+        S = (5,)
+
+        def run(device):
+            a = torch.rand(S, device=device, dtype=torch.float32)
+            b = 2
+            out = torch.empty(S, device=device, dtype=torch.float64)
+
+            try:
+                torch.pow(a, b, out=out)
+            except Exception as e:
+                return e
+
+        cpu_err = run("cpu")
+        meta_err = run("meta")
+
+        if cpu_err is None and meta_err is not None:
+            raise RuntimeError("cpu didn't fail, but meta did.") from meta_err
+        elif cpu_err is not None and meta_err is None:
+            raise RuntimeError("cpu failed, but meta didn't.") from cpu_err
+
+
 instantiate_device_type_tests(TestMeta, globals())
 
 def print_op_str_if_not_supported(op_str):
