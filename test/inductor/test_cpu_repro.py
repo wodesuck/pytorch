@@ -582,18 +582,19 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
-        self._test_lstm_packed(
-            unbatched,
-            input_size,
-            hidden_size,
-            num_layers,
-            bidirectional,
-            bias,
-            empty_state,
-            batch_first,
-            batch_size,
-            seq_len,
-        )
+        with torch.backends.mkldnn.verbose(torch.backends.mkldnn.VERBOSE_ON):
+            self._test_lstm_packed(
+                unbatched,
+                input_size,
+                hidden_size,
+                num_layers,
+                bidirectional,
+                bias,
+                empty_state,
+                batch_first,
+                batch_size,
+                seq_len,
+            )
 
     @parametrize(
         "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
@@ -4426,6 +4427,23 @@ class CPUReproTests(TestCase):
             return torch.prod(arg, 1, dtype=torch.bool)
 
         self.common(fn, (result,))
+
+    # @requires_vectorization
+    # @config.patch("cpp.min_chunk_size", 1)
+    # def test_for_loop_collapsed(self):
+    #     # https://github.com/pytorch/pytorch/issues/122281
+    #     def fn(x):
+    #         return x.transpose(1, 0).contiguous()
+
+    #     x = torch.randn(199, 2)
+    #     opt_fn = torch._dynamo.optimize("inductor")(fn)
+    #     _, code = run_and_get_cpp_code(opt_fn, x)
+    #     self.assertTrue(same(fn(x), opt_fn(x)))
+    #     # def and use
+    #     print(code)
+    #     FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
+    #         code
+    #     )
 
 
 if __name__ == "__main__":
